@@ -4,26 +4,25 @@
    GEOMETRY:
    - Rotor center = bottom-center of .whl-wrap
    - Active slot = slot at index activeIdx, always at angle 270° (12 o'clock)
-   - arcStart + activeIdx*arcStep = 270  →  arcStart = 270 - activeIdx*arcStep
-   - Spotlight positioned exactly over the active node: same center X/Y
+   - Spotlight positioned exactly over the active node
 
-   SMALL-N FIX:
-   - For N ≥ 5: totalArc = 180°, edge nodes marked partial (original behaviour)
-   - For N = 4: totalArc = 130° → all 4 nodes stay in the visible top half
-   - For N = 3: totalArc = 110°
-   - For N = 2: totalArc =  80°
-   - Edge nodes are NOT marked partial when totalArc < 180°
-     (they're fully visible so no reason to hide them)
+   SMALL-N ARC FIX:
+   - N ≥ 5 : totalArc = 180°, edge nodes partial (original)
+   - N = 4 : totalArc = 130°, no partials — all 4 visible
+   - N = 3 : totalArc = 110°, no partials — all 3 visible
+   - N ≤ 2 : SLOTS forced to 1 — single centered plate, arrows cycle dishes
+             This avoids the off-screen problem: R=190px is too large relative
+             to narrow phone widths for a 2-node symmetric arc.
 
    ANIMATION:
-   - Easing: cubic-bezier(0.16,1,0.3,1) — expo-out, friction stop, no bounce
-   - Duration: 700 ms
-   - Card crossfade: content fades out, swaps at mid-spin, fades back in
+   - Easing  : cubic-bezier(0.16,1,0.3,1)  expo-out, no bounce
+   - Duration : 700 ms
+   - Card     : fades out → data swaps at mid-spin → fades back in
 ═══════════════════════════════════════ */
 
 const WHL_DURATION = 700;
 const WHL_EASE     = 'cubic-bezier(0.16,1,0.3,1)';
-const WHL_FADE_MS  = 350;   /* ms into spin when card data swaps */
+const WHL_FADE_MS  = 350;
 
 function wheelSizes() {
   const W = window.innerWidth;
@@ -32,16 +31,13 @@ function wheelSizes() {
   return              { R:335, ns:138, SLOTS:7 };
 }
 
-/* Returns arc width and whether edge nodes should be hidden.
-   Goal: all nodes must have sin(angle) < 0 (above rotor equator → visible).
-   Active node is always at 270° (sin = -1, maximum top).
-   Edge node angle = 270° ± (SLOTS-1)/2 * arcStep.
-   We want sin(edge angle) ≤ 0  →  edge angle ∈ [180°, 360°].
-   A comfortable margin puts the outermost node at ~210° or ~330° max. */
-function arcConfig(SLOTS) {
-  if (SLOTS <= 2) return { totalArc:  80, partial: false };
-  if (SLOTS <= 3) return { totalArc: 110, partial: false };
-  if (SLOTS <= 4) return { totalArc: 130, partial: false };
+/* Arc config — keyed on the EFFECTIVE slot count after N clamping.
+   partial:true = edge nodes hidden (needed when arc=180° clips them off-screen).
+   partial:false = all nodes fully visible, no hiding. */
+function arcConfig(slots) {
+  if (slots <= 1) return { totalArc:   0, partial: false }; /* single plate */
+  if (slots <= 3) return { totalArc: 110, partial: false };
+  if (slots <= 4) return { totalArc: 130, partial: false };
   return              { totalArc: 180, partial: true  };
 }
 
@@ -50,18 +46,23 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
   if (!N) return;
 
   const { R, ns, SLOTS: rawSlots } = wheelSizes();
-  const SLOTS     = Math.min(rawSlots, N);
+
+  /* ── EFFECTIVE SLOTS ──────────────────────────────────────────
+     N ≤ 2 → force 1 slot. A 2-node arc on R=190 pushes the left
+     node off-screen on narrow phones. Single plate + arrows is
+     the cleanest solution and keeps the wheel design intact.
+     N ≥ 3 → clamp to dish count as before.
+  ── */
+  const SLOTS     = N <= 2 ? 1 : Math.min(rawSlots, N);
   const nr        = ns / 2;
   const activeIdx = Math.floor(SLOTS / 2);
 
   const { totalArc, partial: usePartial } = arcConfig(SLOTS);
   const arcStep  = SLOTS > 1 ? totalArc / (SLOTS - 1) : 0;
-  const arcStart = 270 - activeIdx * arcStep;   /* centres arc at 270° */
+  const arcStart = 270 - activeIdx * arcStep;
 
   const topPad   = 58;
   const wrapH    = topPad + R + nr;
-  const spotSize = ns;
-  const spotTop  = topPad;
 
   let activeDish = 0;
   let spinning   = false;
@@ -75,8 +76,8 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
         position:absolute;left:50%;bottom:0;transform:translateX(-50%);
       "></div>
       <div class="whl-spotlight" style="
-        width:${spotSize}px;height:${spotSize}px;position:absolute;
-        left:50%;top:${spotTop}px;transform:translateX(-50%);
+        width:${ns}px;height:${ns}px;position:absolute;
+        left:50%;top:${topPad}px;transform:translateX(-50%);
         z-index:15;pointer-events:none;
       "></div>
       <div class="whl-rotor" id="${uid}_rotor" style="
@@ -91,7 +92,7 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
       <div class="whl-card-wrap">
         <div class="whl-card empty" id="${uid}_card" onclick="${uid}_doAdd()">
           <div class="whl-card-inner" id="${uid}_ci">
-            <div class="whl-card-thumb" id="${uid}_cthumb">
+            <div class="whl-card-thumb">
               <img id="${uid}_cimg" src="" alt="" loading="lazy">
             </div>
             <div class="whl-card-cat"   id="${uid}_ccat"></div>
@@ -131,7 +132,6 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
     const y   = R + R * Math.sin(rad) - nr;
 
     const isActive  = (i === activeIdx);
-    /* Only hide edge nodes when the arc is wide enough to push them off-screen */
     const isPartial = usePartial && (i === 0 || i === SLOTS - 1);
 
     const node = document.createElement('div');
@@ -203,12 +203,9 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
   }
 
   /* ── Rotate ──────────────────────────────────────────────────────
-     Timeline (WHL_DURATION = 700 ms):
-       t = 0 ms         → .fading on ci: text + thumb fade OUT over 280 ms
-       t = 0 ms         → rotor spins with expo-out easing
-       t = WHL_FADE_MS  → content invisible: swap card data silently
-       t = WHL_DURATION → animation done, snap rotor back to 0° (invisible)
-                          reassign node images, single rAF → remove .fading
+     For SLOTS=1 (N≤2): arcStep=0 so animDeg=0 — the rotor doesn't
+     visually spin, but activeDish changes and the card crossfades
+     to the next dish. Feels like a clean flip.
   ── */
   function doRotate(steps) {
     if (spinning) return;
@@ -216,17 +213,17 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
 
     const card     = document.getElementById(`${uid}_card`);
     const ci       = document.getElementById(`${uid}_ci`);
-    const animDeg  = steps * arcStep;
+    const animDeg  = steps * arcStep;   /* 0 when SLOTS=1 — card-only crossfade */
     const nextDish = ((activeDish + steps) % N + N) % N;
 
     /* 1. Fade card content out */
     if (ci) ci.classList.add('fading');
 
-    /* 2. Spin rotor — expo-out feels like a physical push coasting to rest */
+    /* 2. Spin rotor (no-op visually when arcStep=0) */
     rotor.style.transition = `transform ${WHL_DURATION}ms ${WHL_EASE}`;
     rotor.style.transform  = `translateX(-50%) rotate(${animDeg}deg)`;
 
-    /* 3. Counter-rotate faces so images stay upright during the spin */
+    /* 3. Counter-rotate faces (no-op when arcStep=0) */
     for (let i = 0; i < SLOTS; i++) {
       const face = document.getElementById(`${uid}_face${i}`);
       const lbl  = document.getElementById(`${uid}_lbl${i}`);
@@ -237,13 +234,13 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
       if (lbl) lbl.style.transform = `translateX(-50%) rotate(${-animDeg}deg)`;
     }
 
-    /* 4. Mid-spin: content invisible — swap data silently */
+    /* 4. Mid-spin: swap card data while invisible */
     setTimeout(() => {
       setCardData(dishes[nextDish]);
       if (card) card.classList.remove('empty');
     }, WHL_FADE_MS);
 
-    /* 5. End: silent rotor reset → reassign images → fade content back in */
+    /* 5. End: reset rotor, reassign images, reveal card */
     setTimeout(() => {
       activeDish = nextDish;
 
@@ -267,10 +264,7 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
 
   window[`${uid}_rotate`] = (dir) => doRotate(dir);
 
-  /* ── Add active dish to cart ─────────────────────────────────────
-     Only navigate to menu page when coming FROM the home page.
-     If already on the menu, add silently — no rebuild, no flicker.
-  ── */
+  /* ── Add to cart — no rebuild if already on menu page ── */
   window[`${uid}_doAdd`] = function() {
     const dish = dishes[((activeDish % N) + N) % N];
     const ex   = cart.find(c => c.id === dish.id);
@@ -296,7 +290,7 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
     }
   };
 
-  /* ── Touch swipe with momentum ── */
+  /* ── Touch swipe ── */
   let tx0 = 0, tt0 = 0, mSteps = 0, mDir = 0, mTimer = null;
 
   function fireMomentum() {
@@ -331,4 +325,4 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
   }
 
   render();
-       }
+}
