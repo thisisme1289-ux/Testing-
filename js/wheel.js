@@ -7,26 +7,23 @@
    - arcStart + activeIdx*arcStep = 270  →  arcStart = 270 - activeIdx*arcStep
    - Spotlight positioned exactly over the active node: same center X/Y
 
-   DISH TRACKING:
-   - activeDish = index of dish currently under spotlight
-   - On rotate(dir): activeDish shifts, rotor spins by arcStep*dir degrees
-   - Card updates at mid-spin (WHL_FADE_MS) while faded → fades in as rotor settles
+   SMALL-N FIX:
+   - For N ≥ 5: totalArc = 180°, edge nodes marked partial (original behaviour)
+   - For N = 4: totalArc = 130° → all 4 nodes stay in the visible top half
+   - For N = 3: totalArc = 110°
+   - For N = 2: totalArc =  80°
+   - Edge nodes are NOT marked partial when totalArc < 180°
+     (they're fully visible so no reason to hide them)
 
-   SMALL CATEGORY FALLBACK (N < 5):
-   - Categories with 2–4 dishes skip the wheel entirely
-   - buildSmallCatLayout() renders a centred card grid instead
-
-   ANIMATION NOTES:
-   - Easing: cubic-bezier(0.16,1,0.3,1) — expo-out. Fast start, friction stop.
-     No overshoot. Feels like a physical plate being pushed and coasting to rest.
-   - Duration: 700ms per step.
-   - Card crossfade: content + thumb fade out (280ms CSS), swap at 350ms mid-spin,
-     fade back in via rAF after rotor reset. Smooth, never a hard pop.
+   ANIMATION:
+   - Easing: cubic-bezier(0.16,1,0.3,1) — expo-out, friction stop, no bounce
+   - Duration: 700 ms
+   - Card crossfade: content fades out, swaps at mid-spin, fades back in
 ═══════════════════════════════════════ */
 
 const WHL_DURATION = 700;
 const WHL_EASE     = 'cubic-bezier(0.16,1,0.3,1)';
-const WHL_FADE_MS  = 350;
+const WHL_FADE_MS  = 350;   /* ms into spin when card data swaps */
 
 function wheelSizes() {
   const W = window.innerWidth;
@@ -35,89 +32,36 @@ function wheelSizes() {
   return              { R:335, ns:138, SLOTS:7 };
 }
 
-/* ═══════════════════════════════════════
-   SMALL CATEGORY CARD GRID  (N < 5)
-═══════════════════════════════════════ */
-function buildSmallCatLayout(host, dishes, catLabel, accentColor, uid) {
-  const N = dishes.length;
-
-  window[uid + '_addSmall'] = function(idx) {
-    const d  = dishes[idx];
-    const ex = cart.find(c => c.id === d.id);
-    if (ex) ex.qty++;
-    else cart.push({ id: d.id, name: d.name, price: d.price, cat: catLabel, qty: 1 });
-    save();
-    refreshCart();
-    toast('\u2713 Added \u2014 ' + d.name.split(' ').slice(0, 3).join(' '));
-  };
-
-  const cards = dishes.map((dish, i) => `
-    <div class="sml-card" id="${uid}_sml${i}">
-      <div class="sml-img-wrap">
-        <img src="${getImg(dish.name)}" alt="${dish.name}" loading="lazy">
-      </div>
-      <div class="sml-cat">${catLabel}</div>
-      <div class="sml-name">${dish.name}</div>
-      <div class="sml-price">&#8377;${dish.price}</div>
-      <button class="sml-btn" onclick="${uid}_addSmall(${i})">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
-             stroke="#fff" stroke-width="2.5">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5"  y1="12" x2="19" y2="12"/>
-        </svg>
-        Add to Cart
-      </button>
-    </div>
-  `).join('');
-
-  if (!document.getElementById('sml_card_styles')) {
-    const style = document.createElement('style');
-    style.id = 'sml_card_styles';
-    style.textContent = `
-      .sml-row{display:flex;flex-wrap:wrap;gap:18px;justify-content:center;padding:8px 24px 52px;}
-      .sml-card{display:flex;flex-direction:column;align-items:center;background:var(--card,#fff);border-radius:22px;padding:26px 22px 22px;box-shadow:var(--sh-md);border:1.5px solid rgba(0,0,0,.045);flex:1 1 160px;max-width:220px;min-width:150px;cursor:pointer;transition:transform .22s var(--spring,cubic-bezier(.34,1.56,.64,1)),box-shadow .22s;text-align:center;}
-      .sml-card:hover{transform:translateY(-5px);box-shadow:0 18px 44px rgba(0,0,0,.13);}
-      .sml-card:active{transform:scale(.97);}
-      .sml-img-wrap{width:110px;height:110px;border-radius:50%;overflow:hidden;border:3px solid rgba(43,191,155,.55);box-shadow:0 0 0 6px rgba(43,191,155,.1),0 6px 18px rgba(43,191,155,.18);margin-bottom:18px;background:#e8e4dc;flex-shrink:0;}
-      .sml-img-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s;}
-      .sml-card:hover .sml-img-wrap img{transform:scale(1.08);}
-      .sml-cat{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.8px;color:var(--a,#2bbf9b);margin-bottom:7px;}
-      .sml-name{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:700;color:var(--ink,#1a1916);line-height:1.25;margin-bottom:8px;}
-      .sml-price{font-family:'DM Mono',monospace;font-size:17px;font-weight:500;color:var(--p,#1f7a63);margin-bottom:18px;}
-      .sml-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px 16px;border-radius:50px;border:none;background:linear-gradient(135deg,var(--p,#1f7a63),var(--a,#2bbf9b));color:#fff;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(31,122,99,.3);cursor:pointer;transition:transform .2s var(--spring,cubic-bezier(.34,1.56,.64,1)),box-shadow .2s;}
-      .sml-btn:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(31,122,99,.42);}
-      .sml-btn:active{transform:scale(.95);}
-      @media(max-width:480px){.sml-row{gap:12px;padding:8px 16px 44px;}.sml-card{padding:20px 16px 18px;}.sml-img-wrap{width:90px;height:90px;}.sml-name{font-size:16px;}}
-    `;
-    document.head.appendChild(style);
-  }
-
-  host.innerHTML = `<div class="sml-row">${cards}</div>`;
+/* Returns arc width and whether edge nodes should be hidden.
+   Goal: all nodes must have sin(angle) < 0 (above rotor equator → visible).
+   Active node is always at 270° (sin = -1, maximum top).
+   Edge node angle = 270° ± (SLOTS-1)/2 * arcStep.
+   We want sin(edge angle) ≤ 0  →  edge angle ∈ [180°, 360°].
+   A comfortable margin puts the outermost node at ~210° or ~330° max. */
+function arcConfig(SLOTS) {
+  if (SLOTS <= 2) return { totalArc:  80, partial: false };
+  if (SLOTS <= 3) return { totalArc: 110, partial: false };
+  if (SLOTS <= 4) return { totalArc: 130, partial: false };
+  return              { totalArc: 180, partial: true  };
 }
 
-
-/* ═══════════════════════════════════════
-   MAIN WHEEL BUILDER
-═══════════════════════════════════════ */
 function buildWheel(host, dishes, catLabel, accentColor, uid) {
   const N = dishes.length;
   if (!N) return;
-
-  if (N < 5) {
-    buildSmallCatLayout(host, dishes, catLabel, accentColor, uid);
-    return;
-  }
 
   const { R, ns, SLOTS: rawSlots } = wheelSizes();
   const SLOTS     = Math.min(rawSlots, N);
   const nr        = ns / 2;
   const activeIdx = Math.floor(SLOTS / 2);
-  const arcStep   = SLOTS > 1 ? 180 / (SLOTS - 1) : 0;
-  const arcStart  = 270 - activeIdx * arcStep;
-  const topPad    = 58;
-  const wrapH     = topPad + R + nr;
-  const spotSize  = ns;
-  const spotTop   = topPad;
+
+  const { totalArc, partial: usePartial } = arcConfig(SLOTS);
+  const arcStep  = SLOTS > 1 ? totalArc / (SLOTS - 1) : 0;
+  const arcStart = 270 - activeIdx * arcStep;   /* centres arc at 270° */
+
+  const topPad   = 58;
+  const wrapH    = topPad + R + nr;
+  const spotSize = ns;
+  const spotTop  = topPad;
 
   let activeDish = 0;
   let spinning   = false;
@@ -181,12 +125,14 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
 
   /* ── Build nodes ── */
   for (let i = 0; i < SLOTS; i++) {
-    const deg      = arcStart + i * arcStep;
-    const rad      = deg * Math.PI / 180;
-    const x        = R + R * Math.cos(rad) - nr;
-    const y        = R + R * Math.sin(rad) - nr;
+    const deg = arcStart + i * arcStep;
+    const rad = deg * Math.PI / 180;
+    const x   = R + R * Math.cos(rad) - nr;
+    const y   = R + R * Math.sin(rad) - nr;
+
     const isActive  = (i === activeIdx);
-    const isPartial = (i === 0 || i === SLOTS - 1);
+    /* Only hide edge nodes when the arc is wide enough to push them off-screen */
+    const isPartial = usePartial && (i === 0 || i === SLOTS - 1);
 
     const node = document.createElement('div');
     node.className = 'whl-node'
@@ -257,16 +203,12 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
   }
 
   /* ── Rotate ──────────────────────────────────────────────────────
-     Timeline for one step (WHL_DURATION = 700ms):
-
-       t = 0ms          → .fading added  : card content + thumb fade OUT (280ms CSS)
-       t = 0ms          → rotor starts spinning with expo-out easing
-       t = WHL_FADE_MS  → content is fully invisible: silently swap card data
-       t = WHL_DURATION → rotor animation done
-         → transition:none set, rotor snaps back to 0° (invisible, fading still on)
-         → node images reassigned
-         → single rAF: remove .fading → content fades IN (280ms CSS)
-         → spinning = false
+     Timeline (WHL_DURATION = 700 ms):
+       t = 0 ms         → .fading on ci: text + thumb fade OUT over 280 ms
+       t = 0 ms         → rotor spins with expo-out easing
+       t = WHL_FADE_MS  → content invisible: swap card data silently
+       t = WHL_DURATION → animation done, snap rotor back to 0° (invisible)
+                          reassign node images, single rAF → remove .fading
   ── */
   function doRotate(steps) {
     if (spinning) return;
@@ -277,14 +219,14 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
     const animDeg  = steps * arcStep;
     const nextDish = ((activeDish + steps) % N + N) % N;
 
-    /* 1. Begin card fade-out */
+    /* 1. Fade card content out */
     if (ci) ci.classList.add('fading');
 
-    /* 2. Spin rotor — expo-out: plates feel like they're being physically pushed */
+    /* 2. Spin rotor — expo-out feels like a physical push coasting to rest */
     rotor.style.transition = `transform ${WHL_DURATION}ms ${WHL_EASE}`;
     rotor.style.transform  = `translateX(-50%) rotate(${animDeg}deg)`;
 
-    /* 3. Counter-rotate every face so images stay upright while the rotor spins */
+    /* 3. Counter-rotate faces so images stay upright during the spin */
     for (let i = 0; i < SLOTS; i++) {
       const face = document.getElementById(`${uid}_face${i}`);
       const lbl  = document.getElementById(`${uid}_lbl${i}`);
@@ -295,19 +237,18 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
       if (lbl) lbl.style.transform = `translateX(-50%) rotate(${-animDeg}deg)`;
     }
 
-    /* 4. Mid-spin swap: card is fully invisible now — update content silently */
+    /* 4. Mid-spin: content invisible — swap data silently */
     setTimeout(() => {
       setCardData(dishes[nextDish]);
       if (card) card.classList.remove('empty');
     }, WHL_FADE_MS);
 
-    /* 5. End of spin: reset rotor position silently, reassign node images, reveal card */
+    /* 5. End: silent rotor reset → reassign images → fade content back in */
     setTimeout(() => {
       activeDish = nextDish;
 
       rotor.style.transition = 'none';
       rotor.style.transform  = `translateX(-50%) rotate(0deg)`;
-
       for (let i = 0; i < SLOTS; i++) {
         const face = document.getElementById(`${uid}_face${i}`);
         const lbl  = document.getElementById(`${uid}_lbl${i}`);
@@ -317,19 +258,18 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
 
       renderImages();
 
-      /* Single rAF: let browser paint the reset frame, then start fade-in */
       requestAnimationFrame(() => {
         if (ci) ci.classList.remove('fading');
         spinning = false;
       });
-    }, WHL_DURATION + 16); /* +16ms ensures CSS transition is guaranteed finished */
+    }, WHL_DURATION + 16);
   }
 
   window[`${uid}_rotate`] = (dir) => doRotate(dir);
 
   /* ── Add active dish to cart ─────────────────────────────────────
-     KEY FIX: only navigate to menuPg if currently on the home page.
-     If already browsing the menu, just add silently — no rebuild, no flicker.
+     Only navigate to menu page when coming FROM the home page.
+     If already on the menu, add silently — no rebuild, no flicker.
   ── */
   window[`${uid}_doAdd`] = function() {
     const dish = dishes[((activeDish % N) + N) % N];
@@ -342,7 +282,6 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
     refreshCart();
     toast('\u2713 Added \u2014 ' + dish.name.split(' ').slice(0, 3).join(' '));
 
-    /* Only navigate from home page — on menu page, adding is enough */
     const homePage = document.getElementById('home');
     if (homePage && homePage.classList.contains('on')) {
       showPage('menuPg');
@@ -392,4 +331,4 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
   }
 
   render();
-}
+       }
