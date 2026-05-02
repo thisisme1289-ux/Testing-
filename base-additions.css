@@ -1,0 +1,34 @@
+/* ═══════════════════════════════════════════
+   ADD THIS BLOCK TO css/base.css
+   (Append at the end of the file)
+═══════════════════════════════════════════ */
+
+/* Visually hidden — readable by screen readers AND crawlers/AI
+   Use on elements that exist for SEO / accessibility but not visual design.
+   DO NOT use display:none or visibility:hidden — those tell crawlers to skip the content. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Location section — new in index.html */
+.location-sec {
+  background: var(--warm);
+  padding: 80px 0;
+}
+
+@media (max-width: 768px) {
+  .location-sec .sec-wrap > div {
+    flex-direction: column;
+  }
+  .location-sec iframe {
+    height: 260px;
+  }
+}

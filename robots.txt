@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /?view=kitchen
+
+# Block kitchen monitor from all bots
+User-agent: Googlebot
+Allow: /
+Disallow: /?view=kitchen
+
+Sitemap: https://annamay.in/sitemap.xml
