@@ -18,11 +18,18 @@
    - Easing  : cubic-bezier(0.16,1,0.3,1)  expo-out, no bounce
    - Duration : 700 ms
    - Card     : fades out → data swaps at mid-spin → fades back in
+
+   TOUCH (v3.1):
+   - Fires on touchmove as soon as horizontal drag ≥ 22px (instant feel)
+   - Vertical scroll detection: if dy > dx, treat as page scroll (ignored)
+   - Arrow buttons use ontouchstart + preventDefault to bypass 300ms tap delay
+   - Fast flick at touchend adds 1–3 momentum steps
 ═══════════════════════════════════════ */
 
 const WHL_DURATION = 700;
 const WHL_EASE     = 'cubic-bezier(0.16,1,0.3,1)';
 const WHL_FADE_MS  = 350;
+const WHL_SWIPE_PX = 22;   /* horizontal pixels to trigger one step */
 
 function wheelSizes() {
   const W = window.innerWidth;
@@ -86,7 +93,9 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
       "></div>
     </div>
     <div class="whl-bottom">
-      <button class="whl-arr whl-arr-left" onclick="${uid}_rotate(-1)">
+      <button class="whl-arr whl-arr-left"
+        ontouchstart="event.preventDefault();${uid}_rotate(-1)"
+        onclick="${uid}_rotate(-1)">
         <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
       <div class="whl-card-wrap">
@@ -99,6 +108,7 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
             <div class="whl-card-name"  id="${uid}_cname"></div>
             <div class="whl-card-price" id="${uid}_cprice"></div>
             <button class="whl-add-btn"
+                    ontouchstart="event.preventDefault();event.stopPropagation();${uid}_doAdd()"
                     onclick="event.stopPropagation();${uid}_doAdd()">
               <svg viewBox="0 0 24 24">
                 <line x1="12" y1="5"  x2="12" y2="19"/>
@@ -109,14 +119,20 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
           </div>
         </div>
       </div>
-      <button class="whl-arr whl-arr-right" onclick="${uid}_rotate(1)">
+      <button class="whl-arr whl-arr-right"
+        ontouchstart="event.preventDefault();${uid}_rotate(1)"
+        onclick="${uid}_rotate(1)">
         <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
       </button>
       <div class="whl-arrows-mobile">
-        <button class="whl-arr" onclick="${uid}_rotate(-1)">
+        <button class="whl-arr"
+          ontouchstart="event.preventDefault();${uid}_rotate(-1)"
+          onclick="${uid}_rotate(-1)">
           <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
-        <button class="whl-arr" onclick="${uid}_rotate(1)">
+        <button class="whl-arr"
+          ontouchstart="event.preventDefault();${uid}_rotate(1)"
+          onclick="${uid}_rotate(1)">
           <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
       </div>
@@ -150,6 +166,11 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
 
     if (!isPartial && !isActive) {
       const steps = activeIdx - i;
+      /* instant response on touch — no 300ms delay */
+      node.addEventListener('touchstart', e => {
+        e.preventDefault();
+        doRotate(steps);
+      }, { passive: false });
       node.addEventListener('click', () => doRotate(steps));
     }
     if (isActive) {
@@ -290,8 +311,18 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
     }
   };
 
-  /* ── Touch swipe ── */
-  let tx0 = 0, tt0 = 0, mSteps = 0, mDir = 0, mTimer = null;
+  /* ── Touch swipe — instant response on move, momentum on flick ──
+     v3.1 changes vs v3:
+     • Added touchmove listener: rotation fires as soon as horizontal drag
+       crosses WHL_SWIPE_PX (22px), without waiting for finger lift.
+     • Vertical scroll detection: if |dy| > |dx| the gesture is a page
+       scroll — ignored completely so the page can still scroll normally.
+     • tx0/ty0 reset after each triggered step so a long drag auto-steps.
+     • touchend handles momentum steps for fast flicks only.
+     • Arrow buttons use ontouchstart+preventDefault to fire with zero delay.
+  ── */
+  let tx0 = 0, ty0 = 0, tt0 = 0;
+  let mSteps = 0, mDir = 0, mTimer = null;
 
   function fireMomentum() {
     if (mSteps <= 0) return;
@@ -302,27 +333,55 @@ function buildWheel(host, dishes, catLabel, accentColor, uid) {
 
   const wrap = document.getElementById(`${uid}_wrap`);
   if (wrap) {
+
     wrap.addEventListener('touchstart', e => {
       tx0 = e.touches[0].clientX;
+      ty0 = e.touches[0].clientY;
       tt0 = Date.now();
-      clearTimeout(mTimer); mSteps = 0;
+      clearTimeout(mTimer);
+      mSteps = 0;
+    }, { passive: true });
+
+    wrap.addEventListener('touchmove', e => {
+      /* If already animating, ignore — prevents stacking mid-spin */
+      if (spinning) return;
+
+      const dx = e.touches[0].clientX - tx0;
+      const dy = e.touches[0].clientY - ty0;
+
+      /* Not moved enough yet */
+      if (Math.abs(dx) < WHL_SWIPE_PX) return;
+
+      /* Mostly vertical → let the page scroll, don't steal the gesture */
+      if (Math.abs(dy) > Math.abs(dx)) return;
+
+      /* Trigger rotation immediately */
+      doRotate(dx < 0 ? -1 : 1);
+
+      /* Reset origin so the next move segment starts fresh */
+      tx0 = e.touches[0].clientX;
+      ty0 = e.touches[0].clientY;
     }, { passive: true });
 
     wrap.addEventListener('touchend', e => {
       const dx  = e.changedTouches[0].clientX - tx0;
+      const dy  = e.changedTouches[0].clientY - ty0;
       const dt  = Math.max(Date.now() - tt0, 1);
       const vel = Math.abs(dx) / dt;
-      if (Math.abs(dx) < 28) return;
 
+      /* Ignore taps and vertical scrolls */
+      if (Math.abs(dx) < WHL_SWIPE_PX || Math.abs(dy) > Math.abs(dx)) return;
+
+      /* Add momentum steps proportional to flick speed */
       mDir = dx < 0 ? -1 : 1;
-      if      (vel > 2.2) mSteps = 4;
-      else if (vel > 1.4) mSteps = 3;
-      else if (vel > 0.7) mSteps = 2;
-      else                mSteps = 1;
+      if      (vel > 2.2) mSteps = 3;
+      else if (vel > 1.4) mSteps = 2;
+      else if (vel > 0.7) mSteps = 1;
+      else                mSteps = 0;
 
-      fireMomentum();
+      if (mSteps > 0) fireMomentum();
     }, { passive: true });
   }
 
   render();
-}
+     }
